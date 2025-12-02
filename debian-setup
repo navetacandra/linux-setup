@@ -611,7 +611,7 @@ browser_menu() {
 				1) apt_install falkon;;
 				2) apt_install firefox-esr;;
 				3) apt_install chromium;;
-				4) apt apt_install curl
+				4) apt install curl
 				curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
 				curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
 				apt update

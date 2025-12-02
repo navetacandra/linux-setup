@@ -87,6 +87,7 @@ if [ -z "$(grep '$HOME/.local/bin' "$HOME/.bashrc")" ]; then
 	printf '\nPATH=$HOME/.local/bin:$PATH\n' >> "$HOME/.bashrc"
 fi
 
+apt update
 apt_install curl python3 dialog
 
 if ! check_command neofetch; then
@@ -568,7 +569,7 @@ EOF
 cat <<'EOF' >> "$HOME/.profile"
 if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
 	exec startx
-fluxbox
+fi
 EOF
 		fi
 	}

@@ -193,7 +193,7 @@ None XF86AudioLowerVolume :Exec pactl set-sink-volume @DEFAULT_SINK@ -5%   # Dec
 None XF86AudioMute :Exec pactl set-sink-mute @DEFAULT_SINK@ toggle         # Toggle mute
 
 None XF86MonBrightnessUp   :Exec brightnessctl set +10                     # Increase brightness by 10%
-None XF86MonBrigfinessDown :Exec brightnessctl set 10-                    # Decrease brightness by 10%
+None XF86MonBrightnessDown :Exec brightnessctl set 10-                    # Decrease brightness by 10%
 
 Mod4 E         :Exec pcmanfm                                              # Super + E opens file manager
 Control Mod1 T :Exec x-terminal-emulator                                  # Ctrl + Alt + T opens terminal
@@ -359,11 +359,11 @@ panel_position = top center horizontal
 panel_layer = top
 panel_monitor = all
 panel_shrink = 0
-autohide = 0
+autohide = 2
 autohide_show_timeout = 0
 autohide_hide_timeout = 0.5
 autohide_height = 2
-strut_policy = follow_size
+strut_policy = none
 panel_window_name = tint2
 disable_transparency = 1
 mouse_effects = 1
@@ -775,7 +775,7 @@ programming_lang() {
                 8)
 			if ! check_command bun; then
 				printf 'Installing bun..\n'
-				run 'curl -fsSL https://bun.sh/apt_install | bash'
+				run 'curl -fsSL https://bun.sh/install | bash'
 			fi
                    ;;
                 9)

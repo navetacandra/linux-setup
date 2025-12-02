@@ -556,9 +556,6 @@ EOF
 cat <<'EOF' > "$HOME/.xinitrc"
 #!/usr/bin/sh
 
-pipewire &
-wireplumber &
-pipewire-pulse &
 setxkbmap -option ctrl:nocaps &
 
 if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
@@ -571,12 +568,12 @@ EOF
 cat <<'EOF' >> "$HOME/.profile"
 if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
 	exec startx
-fi
+fluxbox
 EOF
 		fi
 	}
 
-	apt_install xorg fluxbox feh tint2 network-manager-gnome pipewire pipewire-pulse wireplumber lxappearance lxterminal pcmanfm htop btop curl blueman xserver-xorg-input-libinput rofi p7zip unzip numlockx gparted flameshot upower
+	apt_install xorg fluxbox feh tint2 network-manager-gnome pulseaudio pavucontrol lxappearance lxterminal pcmanfm htop btop curl blueman xserver-xorg-input-libinput rofi p7zip unzip numlockx gparted flameshot upower
 
 	xinit_setup
 	fluxbox_setup

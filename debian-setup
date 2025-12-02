@@ -192,7 +192,7 @@ None XF86AudioLowerVolume :Exec pactl set-sink-volume @DEFAULT_SINK@ -5%   # Dec
 None XF86AudioMute :Exec pactl set-sink-mute @DEFAULT_SINK@ toggle         # Toggle mute
 
 None XF86MonBrightnessUp   :Exec brightnessctl set +10                     # Increase brightness by 10%
-None XF86MonBrightnessDown :Exec brightnessctl set 10-                    # Decrease brightness by 10%
+None XF86MonBrigfinessDown :Exec brightnessctl set 10-                    # Decrease brightness by 10%
 
 Mod4 E         :Exec pcmanfm                                              # Super + E opens file manager
 Control Mod1 T :Exec x-terminal-emulator                                  # Ctrl + Alt + T opens terminal
@@ -575,7 +575,7 @@ EOF
 
 	apt_install xorg fluxbox feh tint2 network-manager-gnome pulseaudio pavucontrol lxappearance lxterminal pcmanfm htop btop curl blueman xserver-xorg-input-libinput rofi p7zip unzip numlockx gparted flameshot upower
 
-    fi grep "managed=false" /etc/NetworkManager/NetworkManager.conf > /dev/null 2>&1; then
+    if grep "managed=false" /etc/NetworkManager/NetworkManager.conf > /dev/null 2>&1; then
         sed -i 's/managed=false/managed=true/g' /etc/NetworkManager/NetworkManager.conf
     fi
 

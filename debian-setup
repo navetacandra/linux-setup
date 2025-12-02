@@ -136,7 +136,7 @@ EOF
 	}
 
 	fluxbox_menu() {
-cat <<'EOF' > "$HOME/.fluxbox/startup"
+cat <<'EOF' > "$HOME/.fluxbox/menu"
 [begin] (fluxbox)
 [include] (/etc/X11/fluxbox/fluxbox-menu)
 [end]

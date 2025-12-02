@@ -1,0 +1,1048 @@
+#!/usr/bin/bash
+
+run() {
+	if [ -n "$SUDO_USER" ]; then
+		sudo -Hu $SUDO_USER bash --login -i -c "$*"
+	else
+		sudo -Hu $USER bash --login -i -c "$*"
+	fi
+}
+
+check_command() {
+	if run "command -v $1" > /dev/null 2>&1; then return 0;fi
+	return 1
+}
+
+is_installed() {
+	if check_command $1; then echo "on"; else echo "off"; fi
+}
+
+is_installed_sudo() {
+	if which $1 > /dev/null 2>&1; then echo "on"; else echo "off"; fi
+}
+
+apt_install() {
+	pkgs=""
+	for pkg in $*; do
+		if ! check_command $pkg; then
+			pkgs="$pkg $pkgs"
+		fi
+	done
+
+	if [ -n "$pkgs" ]; then
+		apt install $pkgs -y
+	fi
+}
+
+apt_purge() {
+	pkgs=""
+	for pkg in $*; do
+		if check_command $pkg; then
+			pkgs="$pkg $pkgs"
+		fi
+	done
+
+	if [ -n "$pkgs" ]; then
+		apt purge $pkgs -y && apt autoremove -y
+	fi
+}
+
+dialog_menu() {
+    title=$1
+    shift 1
+    items=("$@")
+
+    dialog --clear --title "$title" --menu "Please select" 15 70 3 "${items[@]}" 2>&1 >/dev/tty
+}
+
+dialog_menu_check() {
+    title=$1
+    shift 1
+    items=("$@")
+
+    dialog --clear --title "$title" --checklist "Please select" 15 70 3 "${items[@]}" 2>&1 >/dev/tty
+}
+
+
+if [ "$USER" != "root" ]; then
+	echo "Need sudo/root previlleges to run this script"
+	exit
+fi
+
+if !check_command apt > /dev/null 2>&1; then
+	echo "This script need apt package manager to run"
+	exit
+fi
+
+if [ -z "$SUDO_USER" ]; then
+	SUDO_USER=$USER
+fi
+HOME=$(eval echo "~$SUDO_USER")
+
+cd "$HOME" || { echo "Failed to change directory to $HOME"; exit 1; }
+HOME=$(pwd -P)
+
+run 'mkdir -p "$HOME/.local/bin"'
+if [ -z "$(grep '$HOME/.local/bin' "$HOME/.bashrc")" ]; then
+	printf '\nPATH=$HOME/.local/bin:$PATH\n' >> "$HOME/.bashrc"
+fi
+
+apt_install curl python3 dialog
+
+if ! check_command neofetch; then
+	echo "Installing neofetch.."
+	run 'curl -sLo "$HOME/.local/bin/neofetch" https://raw.githubusercontent.com/dylanaraps/neofetch/refs/heads/master/neofetch'
+	chmod +x "$HOME/.local/bin/neofetch"
+fi
+
+if ! check_command speedtest; then
+	echo "Installing speedtest.."
+	run 'touch $HOME/.local/bin/speedtest'
+	chmod +x "$HOME/.local/bin/speedtest"
+	printf "%s\n%s\n" '#!/usr/bin/sh' 'curl -sSL https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py | python3 -' >> "$HOME/.local/bin/speedtest"
+
+fi
+
+desktop_install() {
+	fluxbox_init() {
+cat <<'EOF' > "$HOME/.fluxbox/init"
+session.menuFile:	~/.fluxbox/menu
+session.keyFile: ~/.fluxbox/keys
+session.styleFile: /usr/share/fluxbox/styles//Squared_for_Debian
+session.configVersion:	13
+session.screen0.toolbar.visible: false
+session.screen0.toolbar.widthPercent: 0
+session.screen0.strftimeFormat: %d %b, %a %02k:%M:%S
+session.screen0.toolbar.tools: prevworkspace, workspacename, nextworkspace
+EOF
+	}
+
+	fluxbox_startup() {
+cat <<'EOF' > "$HOME/.fluxbox/startup"
+xmodmap "/home/navetacandra/.Xmodmap"
+
+which fbautostart > /dev/null
+if [ $? -eq 0 ]; then
+    fbautostart
+fi
+
+tint2 &
+nm-applet &
+blueman-applet &
+numlockx on
+
+exec fluxbox
+EOF
+	}
+
+	fluxbox_menu() {
+cat <<'EOF' > "$HOME/.fluxbox/startup"
+[begin] (fluxbox)
+[include] (/etc/X11/fluxbox/fluxbox-menu)
+[end]
+EOF
+cat <<'EOF' > "$HOME/.fluxbox/windowmenu"
+[begin]
+  [shade]
+  [stick]
+  [maximize]
+  [iconify]
+  [raise]
+  [lower]
+  [settitledialog]
+  [sendto]
+  [layer]
+  [alpha]
+  [extramenus]
+  [separator]
+  [close]
+[end]
+EOF
+	}
+
+	fluxbox_keys() {
+cat <<'EOF' > "$HOME/.fluxbox/keys"
+OnDesktop Mouse1 :HideMenus                    # Hide all open menus
+OnDesktop Mouse2 :WorkspaceMenu                # Open workspace menu
+OnDesktop Mouse3 :RootMenu                     # Open root menu
+
+OnWindow Mod1 Mouse1 :MacroCmd {Raise} {Focus} {StartMoving}   # Alt + left drag moves window
+OnWindowBorder Move1 :StartMoving                             # Drag window border to move
+OnWindow Mod1 Mouse3 :MacroCmd {Raise} {Focus} {StartResizing NearestCorner}  # Alt + right drag resizes window
+OnLeftGrip Move1 :StartResizing bottomleft                     # Resize from bottom-left grip
+OnRightGrip Move1 :StartResizing bottomright                   # Resize from bottom-right grip
+
+Mod4 Left  :PrevWorkspace                                      # Super + Left switches to previous workspace
+Mod4 Right :NextWorkspace                                      # Super + Right switches to next workspace
+
+Mod1 Tab        :NextWindow {groups} (workspace=[current])     # Alt + Tab cycles to next window
+Mod1 Shift Tab  :PrevWindow {groups} (workspace=[current])     # Alt + Shift + Tab cycles to previous window
+
+Mod1 F4   :Close                                                # Alt + F4 closes window
+Mod1 Q    :Kill                                                 # Alt + Q force-kills window
+Mod1 M    :Minimize                                             # Alt + M minimizes window
+Mod1 F    :Maximize                                             # Alt + F maximizes window
+Mod1 F11  :Fullscreen                                           # Alt + F11 toggles fullscreen
+Mod1 space :WindowMenu                                          # Alt + Space opens window menu
+
+Control Mod1 Delete :Exit                                       # Ctrl + Alt + Delete exits Fluxbox
+
+None XF86AudioRaiseVolume :Exec pactl set-sink-volume @DEFAULT_SINK@ +5%   # Increase volume by 5%
+None XF86AudioLowerVolume :Exec pactl set-sink-volume @DEFAULT_SINK@ -5%   # Decrease volume by 5%
+None XF86AudioMute :Exec pactl set-sink-mute @DEFAULT_SINK@ toggle         # Toggle mute
+
+None XF86MonBrightnessUp   :Exec brightnessctl set +10                     # Increase brightness by 10%
+None XF86MonBrightnessDown :Exec brightnessctl set 10-                    # Decrease brightness by 10%
+
+Mod4 E         :Exec pcmanfm                                              # Super + E opens file manager
+Control Mod1 T :Exec x-terminal-emulator                                  # Ctrl + Alt + T opens terminal
+
+Mod4 R  :Exec rofi -show drun                                              # Super opens menu
+Mod4 Shift S   :Exec flameshot gui                                         # Super + Shift + S opens screenshot GUI
+Print          :Exec flameshot launcher                                    # Print Screen opens Flameshot launcher
+EOF
+	}
+
+	fluxbox_setup() {
+		if [ -d "$HOME/.fluxbox" ]; then
+			if [ -d "$HOME/.fluxbox-old" ]; then
+				run 'rm -rf "$HOME/.fluxbox-old"'
+			fi
+			run 'cp -r "$HOME/.fluxbox" "$HOME/.fluxbox-old"'
+			run 'rm -rf "$HOME/.fluxbox"'
+		fi
+		run 'mkdir -p "$HOME/.fluxbox"'
+		fluxbox_init
+		fluxbox_startup
+		fluxbox_menu
+		fluxbox_keys
+	}
+
+	tint2_setup() {
+		if [ -d "$HOME/.config/tint2" ]; then
+			if [ -d "$HOME/.config/tint2.old" ]; then
+				run 'rm -rf "$HOME/.config/tint2.old"'
+			fi
+			run 'cp -r "$HOME/.config/tint2" "$HOME/.config/tint2.old"'
+			run 'rm -rf "$HOME/.config/tint2"'
+		fi
+		run 'mkdir -p "$HOME/.config/tint2"'
+        	run 'mkdir -p "$HOME/.config/tint2/scripts"'
+cat <<'EOF' > "$HOME/.config/tint2/scripts/sysinfo"
+#!/usr/bin/sh
+
+cpu_load() {
+    echo $(grep -o "^[^ ]*" /proc/loadavg)
+        2) code_editor;;
+        2) code_editor;;
+}
+
+cpu_temp() {
+    echo $(($(cat /sys/class/thermal/thermal_zone0/temp)/1000))
+}
+
+ram_stat() {
+    local stat="$(free -h | awk '/Mem:/ ')"
+    local used=$(echo "$stat" | awk '{print $3}')
+    local total=$(echo "$stat" | awk '{print $2}')
+    echo "$used/$total"
+}
+
+net_stat_file() {
+    local file="$(cat /proc/net/dev)"
+    local d=$(echo "$file" | awk '$1 ~ /:$/ && $1 != "lo:" {sum += $2} END {print sum}')
+    local u=$(echo "$file" | awk '$1 ~ /:$/ && $1 != "lo:" {sum += $10} END {print sum}')
+    echo "$d $u"
+}
+
+net_stat() {
+    local ns1="$(net_stat_file)"
+    sleep 1
+    local ns2="$(net_stat_file)"
+    local d1=$(echo "$ns1" | awk '{print $1}')
+    local u1=$(echo "$ns1" | awk '{print $2}')
+    local d2=$(echo "$ns2" | awk '{print $1}')
+    local u2=$(echo "$ns2" | awk '{print $2}')
+    echo "$(($d2-d1)) $(($u2-u1))"
+}
+
+sysinfo() {
+    local net=$(net_stat)
+    local download=$(echo $net | awk '{print $1}')
+    local upload=$(echo $net | awk '{print $2}')
+    echo "CPU: $(cpu_load)% | Temp: $(cpu_temp)℃ | RAM: $(ram_stat) | Download: $(($download/1000))Kbps | Upload: $(($upload/1000))Kbps"
+}
+
+sysinfo
+EOF
+        	chmod +x "$HOME/.config/tint2/scripts/sysinfo"
+
+cat <<'EOF' > "$HOME/.config/tint2/tint2rc"
+# Backgrounds
+# Background 1: Panel
+rounded = 0
+border_width = 0
+border_sides = TBLR
+border_content_tint_weight = 0
+background_content_tint_weight = 0
+background_color = #000000 60
+border_color = #000000 30
+background_color_hover = #000000 60
+border_color_hover = #000000 30
+background_color_pressed = #000000 60
+border_color_pressed = #000000 30
+
+# Background 2: Default task, Iconified task
+rounded = 4
+border_width = 1
+border_sides = TBLR
+border_content_tint_weight = 0
+background_content_tint_weight = 0
+background_color = #777777 20
+border_color = #777777 30
+background_color_hover = #aaaaaa 22
+border_color_hover = #eaeaea 44
+background_color_pressed = #555555 4
+border_color_pressed = #eaeaea 44
+
+# Background 3: Active task
+rounded = 4
+border_width = 1
+border_sides = TBLR
+border_content_tint_weight = 0
+background_content_tint_weight = 0
+background_color = #777777 20
+border_color = #ffffff 40
+background_color_hover = #aaaaaa 22
+border_color_hover = #eaeaea 44
+background_color_pressed = #555555 4
+border_color_pressed = #eaeaea 44
+
+# Background 4: Urgent task
+rounded = 4
+border_width = 1
+border_sides = TBLR
+border_content_tint_weight = 0
+background_content_tint_weight = 0
+background_color = #aa4400 100
+border_color = #aa7733 100
+background_color_hover = #cc7700 100
+border_color_hover = #aa7733 100
+background_color_pressed = #555555 4
+border_color_pressed = #aa7733 100
+
+# Background 5: Tooltip
+rounded = 1
+border_width = 1
+border_sides = TBLR
+border_content_tint_weight = 0
+background_content_tint_weight = 0
+background_color = #222222 100
+border_color = #333333 100
+background_color_hover = #ffffaa 100
+border_color_hover = #000000 100
+background_color_pressed = #ffffaa 100
+border_color_pressed = #000000 100
+
+#-------------------------------------
+# Panel
+panel_items = LTE:SBC
+panel_size = 100% 30
+panel_margin = 0 0
+panel_padding = 2 0 2
+panel_background_id = 1
+wm_menu = 1
+panel_dock = 0
+panel_pivot_struts = 0
+panel_position = top center horizontal
+panel_layer = top
+panel_monitor = all
+panel_shrink = 0
+autohide = 0
+autohide_show_timeout = 0
+autohide_hide_timeout = 0.5
+autohide_height = 2
+strut_policy = follow_size
+panel_window_name = tint2
+disable_transparency = 1
+mouse_effects = 1
+font_shadow = 0
+mouse_hover_icon_asb = 100 0 10
+mouse_pressed_icon_asb = 100 0 0
+scale_relative_to_dpi = 0
+scale_relative_to_screen_height = 0
+
+#-------------------------------------
+# Taskbar
+taskbar_mode = single_desktop
+taskbar_hide_if_empty = 0
+taskbar_padding = 0 0 2
+taskbar_background_id = 0
+taskbar_active_background_id = 0
+taskbar_name = 1
+taskbar_hide_inactive_tasks = 0
+taskbar_hide_different_monitor = 0
+taskbar_hide_different_desktop = 0
+taskbar_always_show_all_desktop_tasks = 0
+taskbar_name_padding = 4 2
+taskbar_name_background_id = 0
+taskbar_name_active_background_id = 0
+taskbar_name_font_color = #e3e3e3 100
+taskbar_name_active_font_color = #ffffff 100
+taskbar_distribute_size = 0
+taskbar_sort_order = none
+task_align = left
+
+#-------------------------------------
+# Task
+task_text = 1
+task_icon = 1
+task_centered = 1
+urgent_nb_of_blink = 100000
+task_maximum_size = 150 35
+task_padding = 2 2 4
+task_tooltip = 1
+task_thumbnail = 0
+task_thumbnail_size = 210
+task_font_color = #ffffff 100
+task_background_id = 2
+task_active_background_id = 3
+task_urgent_background_id = 4
+task_iconified_background_id = 2
+mouse_left = toggle_iconify
+mouse_middle = none
+mouse_right = close
+mouse_scroll_up = toggle
+mouse_scroll_down = iconify
+
+#-------------------------------------
+# System tray (notification area)
+systray_padding = 0 4 2
+systray_background_id = 0
+systray_sort = ascending
+systray_icon_size = 24
+systray_icon_asb = 100 0 0
+systray_monitor = 1
+systray_name_filter =
+
+#-------------------------------------
+# Launcher
+launcher_padding = 2 4 2
+launcher_background_id = 0
+launcher_icon_background_id = 0
+launcher_icon_size = 24
+launcher_icon_asb = 100 0 0
+launcher_icon_theme_override = 0
+startup_notifications = 1
+launcher_tooltip = 1
+launcher_item_app = /usr/share/applications/rofi.desktop
+
+#-------------------------------------
+# Clock
+time1_format = %H:%M
+time2_format = %A %d %B
+time1_timezone =
+time2_timezone =
+clock_font_color = #ffffff 100
+clock_padding = 2 0
+clock_background_id = 0
+clock_tooltip =
+clock_tooltip_timezone =
+clock_lclick_command =
+clock_rclick_command = orage
+clock_mclick_command =
+clock_uwheel_command =
+clock_dwheel_command =
+
+#-------------------------------------
+# Battery
+battery_tooltip = 1
+battery_low_status = 20
+battery_low_cmd = xmessage 'tint2: Battery low!'
+battery_full_cmd =
+battery_font_color = #ffffff 100
+bat1_format =
+bat2_format =
+battery_padding = 2 0
+battery_background_id = 0
+battery_hide = 101
+battery_lclick_command =
+battery_rclick_command =
+battery_mclick_command =
+battery_uwheel_command =
+battery_dwheel_command =
+ac_connected_cmd =
+ac_disconnected_cmd =
+
+#-------------------------------------
+# Separator 1
+separator = new
+separator_background_id = 0
+separator_color = #777777 85
+separator_style = dots
+separator_size = 3
+separator_padding = 1 0
+
+#-------------------------------------
+# Executor 1
+execp = new
+execp_command = $HOME/.config/tint2/scripts/sysinfo
+execp_interval = 5
+execp_has_icon = 0
+execp_cache_icon = 1
+execp_continuous = 0
+execp_markup = 1
+execp_monitor = all
+execp_lclick_command =
+execp_rclick_command =
+execp_mclick_command =
+execp_uwheel_command =
+execp_dwheel_command =
+execp_font_color = #ffffff 100
+execp_padding = 2 0
+execp_background_id = 0
+execp_centered = 0
+execp_icon_w = 0
+execp_icon_h = 0
+
+#-------------------------------------
+# Tooltip
+tooltip_show_timeout = 0.5
+tooltip_hide_timeout = 0.1
+tooltip_padding = 4 4
+tooltip_background_id = 5
+tooltip_font_color = #dddddd 100
+EOF
+	}
+
+	flameshot_setup() {
+		if [ -d "$HOME/.config/flameshot" ]; then
+			if [ -d "$HOME/.config/flameshot.old" ]; then
+				run 'rm -rf "$HOME/.config/flameshot.old"'
+			fi
+			run 'cp -r "$HOME/.config/flameshot" "$HOME/.config/flameshot.old"'
+			run 'rm -rf "$HOME/.config/flameshot"'
+		fi
+		run 'mkdir -p "$HOME/.config/flameshot"'
+cat <<'EOF' > "$HOME/.config/flameshot/flameshot.ini"
+[General]
+autoCloseIdleDaemon=true
+contrastOpacity=188
+disabledTrayIcon=true
+EOF
+	}
+
+	touchpad_setup() {
+		if [ ! -f "/etc/X11/xorg.conf.d/40-libinput.conf" ]; then
+cat <<'EOF' > "/etc/X11/xorg.conf.d/40-libinput.conf"
+Section "InputClass"
+	Identifier "touchpad"
+	MatchIsTouchpad "on"
+	Driver "libinput"
+	Option "Tapping" "on"
+	Option "TappingButtonMap" "lmr"
+	Option "NaturalScrolling" "false"
+	Option "PalmDetection" "true"
+	Option "DisableWhileTyping" "true"
+EndSection
+EOF
+		fi
+	}
+
+	xinit_setup() {
+		if [ -f "$HOME/.xinitrc" ]; then
+			run 'cp "$HOME/.xinitrc" "$HOME/.xinitrc-old"'
+		fi
+cat <<'EOF' > "$HOME/.xinitrc"
+#!/usr/bin/sh
+
+pipewire &
+wireplumber &
+pipewire-pulse &
+setxkbmap -option ctrl:nocaps &
+
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+	eval "$(dbus-launch --sh-syntax --exit-with-session)"
+fi
+
+exec startfluxbox
+EOF
+		if ! grep startx "$HOME/.profile" > /dev/null 2>&1; then
+cat <<'EOF' >> "$HOME/.profile"
+if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
+	exec startx
+fi
+EOF
+		fi
+	}
+
+	apt_install xorg fluxbox feh tint2 network-manager-gnome pipewire pipewire-pulse wireplumber lxappearance lxterminal pcmanfm htop btop curl blueman xserver-xorg-input-libinput rofi p7zip unzip numlockx gparted flameshot upower
+
+	xinit_setup
+	fluxbox_setup
+	tint2_setup
+	touchpad_setup
+	flameshot_setup
+}
+
+browser_menu() {
+	while true; do
+		browsers=(
+			1 "Falkon (Recomended for Lightweight)" $(is_installed falkon)
+			2 "Firefox" $(is_installed firefox-esr)
+			3 "Chromium" $(is_installed chromium)
+			4 "Brave" $(is_installed brave-browser)
+		)
+		choices=$(dialog_menu_check "Browsers" "${browsers[@]}")
+		exit_code=$?
+		if [[ $exit_code -eq 1 || $exit_code -eq 255 ]]; then return; fi
+		clear
+
+		local not_selected="";
+
+		for i in {1..4}; do
+			if [[ ! "${choices[@]}" =~ "${i}" ]]; then
+				not_selected="$not_selected$i "
+			fi
+		done
+
+		for b in $choices; do
+			case $b in
+				1) apt_install falkon;;
+				2) apt_install firefox-esr;;
+				3) apt_install chromium;;
+				4) apt apt_install curl
+				curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+				curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
+				apt update
+				apt_install brave-browser;;
+			esac
+		done
+
+		for b in $not_selected; do
+			case $b in
+				1) apt_purge falkon;;
+				2) apt_purge firefox-esr;;
+				3) apt_purge chromium;;
+				4) rm /usr/share/keyrings/brave-browser-archive-keyring.gpg
+				rm /etc/apt/sources.list.d/brave-browser-release.sources
+				apt update
+				apt_purge brave-browser;;
+			esac
+		done
+	done
+}
+
+code_editor() {
+	vscode_install() {
+		if ! check_command code; then
+			printf "Installing VsCode..\n"
+			run 'curl -sLo code_1.106.2-1763572306_amd64.deb https://vscode.download.prss.microsoft.com/dbazure/download/stable/1e3c50d64110be466c0b4a45222e81d2c9352888/code_1.106.2-1763572306_amd64.deb'
+			dpkg -i code_1.106.2-1763572306_amd64.deb && rm -f code_1.106.2-1763572306_amd64.deb
+		fi
+	}
+	zed_install() {
+		if ! check_command zed; then
+			printf "Installing Zed..\n"
+			run 'curl -fsSL https://zed.dev/install.sh | sh'
+		fi
+	}
+
+	while true; do
+		code_editors=(
+			1 "Visual Studio Code" $(is_installed code)
+			2 "Zed" $(is_installed zed)
+		)
+		choices=$(dialog_menu_check "Code Editor" "${code_editors[@]}")
+		exit_code=$?
+		if [[ $exit_code -eq 1 || $exit_code -eq 255 ]]; then return; fi
+		clear
+
+		local not_selected="";
+
+		for i in {1,2}; do
+			if [[ ! "${choices[@]}" =~ "${i}" ]]; then
+				not_selected="$not_selected$i "
+			fi
+		done
+
+		for c in $choices; do
+			case $c in
+				1) vscode_install;;
+				2) zed_install;;
+			esac
+		done
+
+		for c in $not_selected; do
+			case $c in
+				1)
+					if check_command code; then
+						echo "Uninstalling VSCode.."
+						apt_purge code
+					fi;;
+				2)
+					if check_command zed; then
+						echo "Uninstalling zed.."
+						run 'rm -rf $HOME/.local/zed.app'
+						run 'rm -rf $HOME/.local/bin/zed'
+						run 'rm -rf $HOME/.config/zed'
+					fi;;
+			esac
+		done
+	done
+}
+
+programming_lang() {
+    while true; do
+	programming_lang_items=(
+		1 "C (gcc)" $(is_installed gcc)
+		2 "C (clang)" $(is_installed clang)
+		3 "G++" $(is_installed g++)
+		4 "Go" $(is_installed go)
+		5 "Rust" $(is_installed rustc)
+		6 "Python (uv)" $(is_installed uv)
+		7 "Javascript (NodeJS with NVM)" $(is_installed nvm)
+		8 "Javascript (Bun)" $(is_installed bun)
+		9 "PHP" $(is_installed php)
+    	)
+        choices=$(dialog_menu_check "Programming Languages" "${programming_lang_items[@]}")
+	exit_code=$?
+	if [[ $exit_code -eq 1 || $exit_code -eq 255 ]]; then return; fi
+        clear
+
+	local not_selected="";
+
+	for i in {1..9}; do
+		if [[ ! "${choices[@]}" =~ "${i}" ]]; then
+			not_selected="$not_selected$i "
+		fi
+	done
+
+        for lang in $choices; do
+            case $lang in
+                1)
+			if ! check_command gcc; then
+				printf 'Installing gcc..\n'
+				apt_install gcc
+			fi
+                    ;;
+                2)
+			if ! check_command clang; then
+				printf 'Installing clang..\n'
+				apt_install clang
+			fi
+                    ;;
+                3)
+			if ! check_command g++; then
+				printf 'Installing g++..\n'
+				apt_install g++
+			fi
+                    ;;
+                4)
+			if ! check_command go; then
+				printf 'Installing go..\n'
+				local gover=$(curl -s "https://go.dev/VERSION?m=text" | head -n 1)
+				curl -Lo "$gover.linux-amd64.tar.gz" "https://go.dev/dl/$gover.linux-amd64.tar.gz"
+				rm -rf /usr/local/go && tar -C /usr/local -xzf "$gover.linux-amd64.tar.gz"
+				if ! grep "/usr/local/go/bin" $HOME/.bashrc >/dev/null 2>&1; then
+					printf "PATH=/usr/local/go/bin:\$PATH" >> $HOME/.bashrc
+				fi
+				rm -rf "$gover.linux-amd64.tar.gz"
+		   	fi
+		;;
+                5)
+                   	if ! check_command rustc; then
+				printf 'Installing rust..\n'
+				run 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh';
+			fi
+		;;
+                6)
+                   	if ! check_command uv; then
+				printf 'Installing uv..\n'
+				run 'curl -fsSL https://astral.sh/uv/install.sh | sh'
+			fi
+		;;
+                7)
+			if ! check_command nvm; then
+				printf 'Installing nodejs..\n'
+				run 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash'
+				\. "$HOME/.nvm/nvm.sh"
+				nvm apt_install --lts
+		    	fi
+                   ;;
+                8)
+			if ! check_command bun; then
+				printf 'Installing bun..\n'
+				run 'curl -fsSL https://bun.sh/apt_install | bash'
+			fi
+                   ;;
+                9)
+			if ! check_command php; then
+				printf 'Installing PHP..\n'
+				apt_install php
+			fi
+		;;
+            esac
+        done
+
+	for lang in $not_selected; do
+            case $lang in
+                1)
+                   	if check_command gcc; then
+				printf 'Uninstalling gcc..\n'
+				apt_purge gcc
+			fi
+                    ;;
+                2)
+                   	if check_command clang; then
+				printf 'Uninstalling clang..\n'
+				apt_purge clang
+			fi
+                    ;;
+                3)
+                   	if check_command g++; then
+				printf 'Uninstalling g++..\n'
+				apt_purge g++
+			fi
+                    ;;
+                4)
+			if check_command go; then
+				printf 'Uninstalling go..\n'
+				rm -rf /usr/local/go
+				rm -rf "$HOME/go"
+		   	fi
+		;;
+                5)
+                   	if check_command rustc; then
+				printf 'Uninstalling rust..\n'
+				run 'rustup self uninstall'
+			fi
+		;;
+                6)
+                   	if check_command uv; then
+				printf 'Uninstalling uv..\n'
+				run 'uv cache clean'
+				run 'rm -r "$(uv python dir)"'
+				run 'rm -r "$(uv tool dir)"'
+				run 'rm $HOME/.local/bin/uv $HOME/.local/bin/uvx'
+			fi
+		;;
+                7)
+			if check_command nvm; then
+				printf 'Uninstalling nodejs..\n'
+				rm -rf "$HOME/.nvm"
+		    	fi
+                   ;;
+                8)
+			if check_command bun; then
+				printf 'Uninstalling bun..\n'
+				rm -rf "$HOME/.bun"
+			fi
+                   ;;
+                9)
+			if check_command php; then
+				printf 'Uninstalling PHP..\n'
+				apt_purge php
+		       	fi
+		;;
+            esac
+        done
+    done
+}
+
+is_installed_sudo() {
+    if command -v $1 > /dev/null 2>&1; then echo "on"; else echo "off"; fi
+}
+
+dev_tools() {
+    while true; do
+        dev_tools_items=(
+            1 "Git (with tig/lazygit)" $(is_installed git)
+            2 "SSH Client" $(is_installed ssh)
+            3 "Docker" $(is_installed docker)
+            4 "Podman" $(is_installed podman)
+            5 "Warp (1.1.1.1)" $(is_installed warp-cli)
+            6 "Cloudflared" $(is_installed cloudflared)
+            7 "jq" $(is_installed jq)
+            8 "SQLite" $(is_installed sqlite3)
+            9 "Nginx" $(is_installed_sudo nginx)
+        )
+        choices=$(dialog_menu_check "Dev Essentials" "${dev_tools_items[@]}")
+        exit_code=$?
+        if [[ $exit_code -eq 1 || $exit_code -eq 255 ]]; then return; fi
+        clear
+
+        local not_selected=""
+        for i in {1..9}; do
+            if [[ ! "${choices[@]}" =~ "${i}" ]]; then
+                not_selected="$not_selected$i "
+            fi
+        done
+
+        for c in $choices; do
+            case $c in
+                1) # Git (with tig/lazygit)
+                    if ! check_command git; then
+                        apt_install git
+                        run 'git config --global init.defaultBranch main'
+                    fi
+                    if ! check_command lazygit; then
+                        if ! check_command tig; then
+                            apt_install tig
+                        fi
+                    fi
+                    ;;
+                2) # SSH Client
+                    if ! check_command ssh; then
+                        apt_install openssh-client
+                    fi
+                    ;;
+                3) # Docker
+                    if ! check_command docker; then
+                        echo "Installing Docker..."
+                        apt_install ca-certificates curl
+                        install -m 0755 -d /etc/apt/keyrings
+                        curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+                        chmod a+r /etc/apt/keyrings/docker.asc
+                        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+                        apt update
+                        apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+                        usermod -aG docker $SUDO_USER
+                    fi
+                    ;;
+                4) # Podman
+                    if ! check_command podman; then
+                        echo "Installing Podman..."
+                        apt_install uidmap slirp4netns podman podman-compose runc
+                    fi
+                    ;;
+                5) # Warp (1.1.1.1)
+                    if ! check_command warp-cli; then
+                        echo "Installing Cloudflare Warp..."
+                        curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+                        echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" > /etc/apt/sources.list.d/cloudflare-client.list
+                        apt update
+                        apt_install cloudflare-warp
+                    fi
+                    ;;
+                6) # Cloudflared
+                    if ! check_command cloudflared; then
+                        echo "Installing Cloudflared..."
+                        run 'curl -sLo cloudflared.deb $(curl -s https://api.github.com/repos/cloudflare/cloudflared/releases/latest | grep "/cloudflared-linux-amd64.deb" | cut -d : -f 2,3 | tr -d \" )'
+                        apt_install ./cloudflared.deb && rm -rf ./cloudflared.deb
+                    fi
+                    ;;
+                7) # jq
+                    if ! check_command jq; then
+                        apt_install jq
+                    fi
+                    ;;
+                8) # SQLite
+                    if ! check_command sqlite3; then
+                        apt_install sqlite3
+                    fi
+                    ;;
+                9) # Nginx
+                    if [ "$(is_installed_sudo nginx)" == "off" ]; then
+                        apt_install nginx
+                    fi
+                    ;;
+            esac
+        done
+
+        for c in $not_selected; do
+            case $c in
+                1) # Git (with tig/lazygit)
+                    if check_command git; then
+                        echo "Uninstalling Git..."
+                        apt_purge git tig lazygit
+                    fi
+                    ;;
+                2) # SSH Client
+                    if check_command ssh; then
+                        echo "Uninstalling SSH Client..."
+                        apt purge -y openssh-client
+                        apt autoremove -y
+                    fi
+                    ;;
+                3) # Docker
+                    if check_command docker; then
+                        echo "Uninstalling Docker..."
+                        apt purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+                        apt autoremove -y
+                        rm -rf /var/lib/docker
+                        rm -rf /var/lib/containerd
+                        rm -f /etc/apt/sources.list.d/docker.list
+                        rm -f /etc/apt/keyrings/docker.asc
+                        apt update
+                    fi
+                    ;;
+                4) # Podman
+                    if check_command podman; then
+                        echo "Uninstalling Podman..."
+                        apt_purge uidmap slirp4netns podman podman-compose runc
+                    fi
+                    ;;
+                5) # Warp (1.1.1.1)
+                    if check_command warp-cli; then
+                        echo "Uninstalling Cloudflare Warp..."
+                        apt purge -y cloudflare-warp
+                        apt autoremove -y
+                        rm -f /etc/apt/sources.list.d/cloudflare-client.list
+                        rm -f /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+                        apt update
+                    fi
+                    ;;
+                6) # Cloudflared
+                    if check_command cloudflared; then
+                        echo "Uninstalling Cloudflared..."
+                        apt_purge cloudflared
+                    fi
+                    ;;
+                7) # jq
+                    if check_command jq; then
+                        echo "Uninstalling jq..."
+                        apt_purge jq
+                    fi
+                    ;;
+                8) # SQLite
+                    if check_command sqlite3; then
+                        echo "Uninstalling SQLite..."
+                        apt_purge sqlite3
+                    fi
+                    ;;
+                9) # Nginx
+                    if [ "$(is_installed_sudo nginx)" == "on" ]; then
+                        echo "Uninstalling Nginx..."
+                        apt purge -y nginx
+                        apt autoremove -y
+                    fi
+                    ;;
+            esac
+        done
+    done
+}
+
+items=(
+    1 "Dekstop / Interface"
+    2 "Browser"
+    3 "Code Editor"
+    4 "Programming Languages"
+    5 "Dev Essentials"
+)
+
+while true; do
+    choice=$(dialog_menu "Main Menu" "${items[@]}")
+    exit_code=$?
+    if [[ $exit_code -eq 1 || $exit_code -eq 255 ]]; then break; fi
+    clear
+    case $choice in
+        1) desktop_install ;;
+        2) browser_menu ;;
+        3) code_editor ;;
+        4) programming_lang ;;
+        5) dev_tools ;;
+        *) break ;;
+    esac
+done
+clear

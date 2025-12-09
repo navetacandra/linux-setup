@@ -234,8 +234,6 @@ cat <<'EOF' > "$HOME/.config/tint2/scripts/sysinfo"
 
 cpu_load() {
     echo $(grep -o "^[^ ]*" /proc/loadavg)
-        2) code_editor;;
-        2) code_editor;;
 }
 
 cpu_temp() {

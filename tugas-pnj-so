@@ -1,14 +1,44 @@
 #!/bin/sh
 set -e
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "ERROR: Script ini harus dijalankan pertama kali sebagai root untuk setup user."
+    exit 1
+fi
+
+echo ">>> [ROOT] Menyiapkan environment build..."
+cat << 'EOF' > /etc/apk/repositories
+http://dl-cdn.alpinelinux.org/alpine/v3.23/main
+http://dl-cdn.alpinelinux.org/alpine/v3.23/community
+EOF
+apk update && apk upgrade
+apk add abuild alpine-conf syslinux xorriso squashfs-tools grub mtools git python3 curl sudo bash
+
+if ! id "builder" >/dev/null 2>&1; then
+    echo ">>> [ROOT] Membuat user 'builder'..."
+    adduser -D builder
+    addgroup builder abuild
+    adduser builder abuild
+fi
+
+echo ">>> [ROOT] Mengkonfigurasi sudoers..."
+echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+chmod 0440 /etc/sudoers.d/builder
+
+# --- SCRIPT BUILDER DIMULAI DI SINI ---
+cat << 'EOF' > /home/builder/run_build.sh
+#!/bin/sh
+set -e
 export PROFILENAME=alpine-test
 
 # --- 0. CLEANUP TOTAL ---
+cd "$HOME"
+
 echo ">>> Membersihkan sisa build sebelumnya..."
 rm -rf "$HOME/packages"
 rm -rf "$HOME/distfiles"
 rm -rf "$HOME/.abuild"
 rm -rf "$HOME/aports/community/menu-install"
-# rm -rf "$HOME/aports" # Biarkan aports agar tidak perlu download ulang
 
 # --- 1. PERSIAPAN SISTEM ---
 echo ">>> Persiapan Sistem..."
@@ -22,12 +52,12 @@ abuild-keygen -a -n
 mkdir -p "$HOME/distfiles"
 mkdir -p "$HOME/packages"
 
-# Config abuild (PENTING: Gunakan >> agar tidak menimpa setting key)
+# Config abuild
 echo "SRCDEST=$HOME/distfiles" >> "$HOME/.abuild/abuild.conf"
 echo "REPODEST=$HOME/packages" >> "$HOME/.abuild/abuild.conf"
 echo "PACKAGER=\"Build User <dev@navetacandraa.my.id>\"" >> "$HOME/.abuild/abuild.conf"
 
-# Copy public key ke /etc/apk/keys (Best effort)
+# Copy public key ke /etc/apk/keys
 if sudo -n true 2>/dev/null; then
     sudo cp "$HOME/.abuild/"*.rsa.pub /etc/apk/keys/
 else
@@ -44,7 +74,7 @@ echo ">>> Memulai Build Package..."
 mkdir -p ~/aports/community/menu-install
 cd ~/aports/community/menu-install
 
-cat << 'EOF' > APKBUILD
+cat << 'PKG' > APKBUILD
 # Maintainer: Naveta Candra <dev@navetacandraa.my.id>
 pkgname=menu-install
 pkgver=1.0
@@ -53,7 +83,7 @@ pkgdesc="Custom Alpine Setup Script"
 url="https://github.com/navetacandra/linux-setup"
 arch="x86_64"
 license="MIT"
-depends="bash curl"
+depends="bash curl sudo"
 source="https://raw.githubusercontent.com/navetacandra/linux-setup/refs/heads/main/alpine-setup"
 builddir="$srcdir"
 options="!check"
@@ -61,14 +91,11 @@ options="!check"
 package() {
     install -Dm755 alpine-setup "$pkgdir/usr/bin/menu-install"
 }
-EOF
+PKG
 
 abuild checksum
 
 echo ">>> Menjalankan abuild -r..."
-# PERBAIKAN DISINI:
-# Gunakan -r untuk install dependency.
-# Gunakan "|| true" agar jika error signature muncul, script tidak mati.
 abuild -r || true
 
 # Cek manual apakah file .apk berhasil dibuat
@@ -85,14 +112,11 @@ echo ">>> Generating Repository Index..."
 
 cd "$HOME/packages/community/x86_64" || cd "$HOME/packages/community/noarch" || { echo "ERROR: Folder package tidak ketemu!"; exit 1; }
 
-# Hapus index lama yg mungkin corrupt/untrusted
 rm -f APKINDEX.tar.gz
 
-# Buat Index baru (Allow untrusted karena key belum sempurna di host)
 echo ">>> Running apk index..."
 apk index --allow-untrusted -o APKINDEX.tar.gz *.apk || true
 
-# Cari Private Key
 PRIV_KEY=$(find "$HOME/.abuild" -name "*.rsa" | head -n 1)
 if [ -z "$PRIV_KEY" ]; then
     echo "ERROR: Private key tidak ditemukan di $HOME/.abuild/"
@@ -107,13 +131,15 @@ echo ">>> Index generated and signed."
 echo ">>> Configuring ISO Profile..."
 TARGET_PROFILE="$HOME/aports/scripts/mkimg.$PROFILENAME.sh"
 
-cat << EOF > "$TARGET_PROFILE"
+# PERBAIKAN DISINI: Hapus tanda kutip di 'PROF' menjadi PROF
+cat << PROF > "$TARGET_PROFILE"
 profile_$PROFILENAME() {
     profile_standard
     kernel_cmdline="console=tty0 console=ttyS0,115200"
     syslinux_serial="0 115200"
     
     # Tambahkan package custom dan key public user
+    # Variabel \$apks menggunakan backslash agar tidak diekspansi sekarang, tapi nanti oleh mkimage
     apks="\$apks bash menu-install openssl ca-certificates"
 
     local _k _a
@@ -125,13 +151,15 @@ profile_$PROFILENAME() {
     done
     apks="\$apks linux-firmware"
 }
-EOF
+PROF
 
 echo ">>> Menjalankan Python Web Server di port 8080..."
 cd "$HOME/packages/community"
+# Matikan server lama jika ada
+pkill -f "http.server 8080" || true
 python3 -m http.server 8080 &
 HTTP_PID=$!
-sleep 2 # Tunggu server nyala
+sleep 2 
 
 # --- 5. BUILD ISO ---
 echo ">>> Starting ISO Build..."
@@ -143,15 +171,33 @@ cp "$HOME/.abuild/"*.rsa.pub ~/iso/ || true
 
 sh mkimage.sh \
   --tag edge \
-  --outdir ~/iso \
+  --outdir /iso \
   --arch x86_64 \
   --repository https://dl-cdn.alpinelinux.org/alpine/edge/main \
   --repository https://dl-cdn.alpinelinux.org/alpine/edge/community \
   --repository http://127.0.0.1:8080 \
   --profile "$PROFILENAME"
 
-kill -9 $HTTP_PID
+kill "$HTTP_PID" 2>/dev/null || true
 echo "-------------------------------------------------------"
 echo "Build Selesai!"
-echo "Lokasi ISO: $(ls ~/iso/alpine-*.iso 2>/dev/null)"
+echo "Lokasi ISO: $(ls /iso/alpine-*.iso 2>/dev/null)"
 echo "-------------------------------------------------------"
+EOF
+# --- SCRIPT BUILDER BERAKHIR DI SINI ---
+
+chown builder:builder /home/builder/run_build.sh
+chmod +x /home/builder/run_build.sh
+echo ">>> [ROOT] Mengalihkan eksekusi ke user 'builder'..."
+
+mkdir -p /iso
+chmod 777 /iso
+sudo -u builder bash /home/builder/run_build.sh
+
+echo ">>> [ROOT] Membersihkan user dan sisa build..."
+pkill -u builder || true
+sleep 1
+deluser --remove-home builder
+rm -f /etc/sudoers.d/builder
+
+echo ">>> [ROOT] Proses selesai."

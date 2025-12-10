@@ -135,6 +135,7 @@ TARGET_PROFILE="$HOME/aports/scripts/mkimg.$PROFILENAME.sh"
 cat << PROF > "$TARGET_PROFILE"
 profile_$PROFILENAME() {
     profile_standard
+    kernel_flavors="lts"
     kernel_cmdline="console=tty0 console=ttyS0,115200"
     syslinux_serial="0 115200"
     

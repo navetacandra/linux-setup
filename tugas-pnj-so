@@ -1,0 +1,157 @@
+#!/bin/sh
+set -e
+export PROFILENAME=alpine-test
+
+# --- 0. CLEANUP TOTAL ---
+echo ">>> Membersihkan sisa build sebelumnya..."
+rm -rf "$HOME/packages"
+rm -rf "$HOME/distfiles"
+rm -rf "$HOME/.abuild"
+rm -rf "$HOME/aports/community/menu-install"
+# rm -rf "$HOME/aports" # Biarkan aports agar tidak perlu download ulang
+
+# --- 1. PERSIAPAN SISTEM ---
+echo ">>> Persiapan Sistem..."
+mkdir -pv ~/tmp
+export TMPDIR=~/tmp
+
+# Setup Key (Paksa overwrite)
+abuild-keygen -a -n
+
+# Setup direktori output
+mkdir -p "$HOME/distfiles"
+mkdir -p "$HOME/packages"
+
+# Config abuild (PENTING: Gunakan >> agar tidak menimpa setting key)
+echo "SRCDEST=$HOME/distfiles" >> "$HOME/.abuild/abuild.conf"
+echo "REPODEST=$HOME/packages" >> "$HOME/.abuild/abuild.conf"
+echo "PACKAGER=\"Build User <dev@navetacandraa.my.id>\"" >> "$HOME/.abuild/abuild.conf"
+
+# Copy public key ke /etc/apk/keys (Best effort)
+if sudo -n true 2>/dev/null; then
+    sudo cp "$HOME/.abuild/"*.rsa.pub /etc/apk/keys/
+else
+    echo ">>> Warning: Tidak bisa sudo, nanti key akan dicopy manual ke ISO."
+fi
+
+# Clone aports
+if [ ! -d "$HOME/aports" ]; then
+    git clone --depth=1 https://gitlab.alpinelinux.org/alpine/aports.git ~/aports
+fi
+
+# --- 2. BUILD PACKAGE ---
+echo ">>> Memulai Build Package..."
+mkdir -p ~/aports/community/menu-install
+cd ~/aports/community/menu-install
+
+cat << 'EOF' > APKBUILD
+# Maintainer: Naveta Candra <dev@navetacandraa.my.id>
+pkgname=menu-install
+pkgver=1.0
+pkgrel=0
+pkgdesc="Custom Alpine Setup Script"
+url="https://github.com/navetacandra/linux-setup"
+arch="x86_64"
+license="MIT"
+depends="bash curl"
+source="https://raw.githubusercontent.com/navetacandra/linux-setup/refs/heads/main/alpine-setup"
+builddir="$srcdir"
+options="!check"
+
+package() {
+    install -Dm755 alpine-setup "$pkgdir/usr/bin/menu-install"
+}
+EOF
+
+abuild checksum
+
+echo ">>> Menjalankan abuild -r..."
+# PERBAIKAN DISINI:
+# Gunakan -r untuk install dependency.
+# Gunakan "|| true" agar jika error signature muncul, script tidak mati.
+abuild -r || true
+
+# Cek manual apakah file .apk berhasil dibuat
+APK_FILE=$(find "$HOME/packages" -name "menu-install-*.apk" | head -n 1)
+if [ -z "$APK_FILE" ]; then
+    echo "ERROR: Build gagal! File .apk tidak ditemukan."
+    exit 1
+else
+    echo ">>> Build Sukses: $APK_FILE"
+fi
+
+# --- 3. FIX REPO INDEX (MANUAL) ---
+echo ">>> Generating Repository Index..."
+
+cd "$HOME/packages/community/x86_64" || cd "$HOME/packages/community/noarch" || { echo "ERROR: Folder package tidak ketemu!"; exit 1; }
+
+# Hapus index lama yg mungkin corrupt/untrusted
+rm -f APKINDEX.tar.gz
+
+# Buat Index baru (Allow untrusted karena key belum sempurna di host)
+echo ">>> Running apk index..."
+apk index --allow-untrusted -o APKINDEX.tar.gz *.apk || true
+
+# Cari Private Key
+PRIV_KEY=$(find "$HOME/.abuild" -name "*.rsa" | head -n 1)
+if [ -z "$PRIV_KEY" ]; then
+    echo "ERROR: Private key tidak ditemukan di $HOME/.abuild/"
+    exit 1
+fi
+
+echo ">>> Signing index using key: $PRIV_KEY"
+abuild-sign -k "$PRIV_KEY" APKINDEX.tar.gz
+echo ">>> Index generated and signed."
+
+# --- 4. CONFIG PROFILE ISO ---
+echo ">>> Configuring ISO Profile..."
+TARGET_PROFILE="$HOME/aports/scripts/mkimg.$PROFILENAME.sh"
+
+cat << EOF > "$TARGET_PROFILE"
+profile_$PROFILENAME() {
+    profile_standard
+    kernel_cmdline="console=tty0 console=ttyS0,115200"
+    syslinux_serial="0 115200"
+    
+    # Tambahkan package custom dan key public user
+    apks="\$apks bash menu-install openssl ca-certificates"
+
+    local _k _a
+    for _k in \$kernel_flavors; do
+        apks="\$apks linux-\$_k"
+        for _a in \$kernel_addons; do
+            apks="\$apks \$_a-\$_k"
+        done
+    done
+    apks="\$apks linux-firmware"
+}
+EOF
+
+echo ">>> Menjalankan Python Web Server di port 8080..."
+cd "$HOME/packages/community"
+python3 -m http.server 8080 &
+HTTP_PID=$!
+sleep 2 # Tunggu server nyala
+
+# --- 5. BUILD ISO ---
+echo ">>> Starting ISO Build..."
+cd ~/aports/scripts
+mkdir -p ~/iso
+
+# Salin public key ke folder ISO
+cp "$HOME/.abuild/"*.rsa.pub ~/iso/ || true
+
+sh mkimage.sh \
+  --tag edge \
+  --outdir ~/iso \
+  --arch x86_64 \
+  --repository https://dl-cdn.alpinelinux.org/alpine/edge/main \
+  --repository https://dl-cdn.alpinelinux.org/alpine/edge/community \
+  --repository http://127.0.0.1:8080 \
+  --profile "$PROFILENAME"
+
+kill -9 $HTTP_PID
+echo "-------------------------------------------------------"
+echo "Build Selesai!"
+echo "Lokasi ISO: $(ls ~/iso/alpine-*.iso 2>/dev/null)"
+echo "-------------------------------------------------------"

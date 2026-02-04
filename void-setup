@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+set -e
+
+### ===============================
+### System Update & Base Utilities
+### ===============================
+sudo xbps-install -Syu
+sudo xbps-install -Sy fastfetch mesa-vulkan-radeon wget curl xz unzip p7zip
+
+### ===============================
+### Networking (Laptop Friendly)
+### ===============================
+sudo xbps-install -Sy NetworkManager network-manager-applet
+
+# Disable legacy network services
+sudo rm -f /var/service/{dhcpcd,wpa_supplicant}
+
+# Enable NetworkManager
+sudo ln -sf /etc/sv/NetworkManager /var/service
+
+### ===============================
+### Xorg + XFCE Desktop
+### ===============================
+sudo xbps-install -Sy \
+  xorg \
+  xfce4 \
+  rofi \
+  flameshot
+
+### ===============================
+### Display Manager (LightDM)
+### ===============================
+sudo xbps-install -Sy lightdm lightdm-gtk-greeter
+
+sudo ln -sf /etc/sv/dbus /var/service
+sudo ln -sf /etc/sv/lightdm /var/service
+
+### ===============================
+### Fonts
+### ===============================
+sudo xbps-install -Sy \
+  noto-fonts-ttf \
+  noto-fonts-cjk \
+  noto-fonts-emoji
+
+### ===============================
+### Audio (PipeWire)
+### ===============================
+sudo xbps-install -Sy \
+  pipewire \
+  alsa-pipewire \
+  wireplumber \
+  pavucontrol \
+  xfce4-pulseaudio-plugin
+
+# ---- Custom single runit service for full PipeWire stack ----
+sudo mkdir -p /etc/sv/pipewire-stack
+
+sudo tee /etc/sv/pipewire-stack/run > /dev/null <<'EOF'
+#!/bin/sh
+set -e
+
+pipewire &
+PIPEWIRE_PID=$!
+
+pipewire-pulse &
+PULSE_PID=$!
+
+wireplumber &
+WIREPLUMBER_PID=$!
+
+wait -n
+
+kill $PIPEWIRE_PID $PULSE_PID $WIREPLUMBER_PID 2>/dev/null || true
+wait
+EOF
+
+sudo chmod +x /etc/sv/pipewire-stack/run
+
+# Disable possible default services (ignore if not exist)
+sudo rm -f /var/service/pipewire \
+           /var/service/pipewire-pulse \
+           /var/service/wireplumber
+
+# Enable unified stack
+sudo ln -sf /etc/sv/pipewire-stack /var/service/pipewire-stack
+
+### ===============================
+### Browser (Zen)
+### ===============================
+wget https://github.com/zen-browser/desktop/releases/download/1.18.3b/zen.linux-x86_64.tar.xz
+tar xvf zen.linux-x86_64.tar.xz
+rm zen.linux-x86_64.tar.xz
+
+sudo mv zen /opt/zen
+sudo ln -sf /opt/zen/zen /bin/zen
+
+### ===============================
+### Editor (Zed)
+### ===============================
+curl -f https://zed.dev/install.sh | sh
+
+### ===============================
+### Nix + Dev Tools
+### ===============================
+sudo xbps-install -Sy nix git lazygit
+
+mkdir -p ~/.config/nix
+echo "experimental-features = nix-command flakes" > ~/.config/nix/nix.conf
+
+### ===============================
+### Shell Environment
+### ===============================
+if ! grep -q '.local/bin' ~/.bashrc 2>/dev/null; then
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+fi
+
+### ===============================
+### Laptop UX Tweaks (XFCE)
+### ===============================
+# Ensure NetworkManager applet autostarts
+mkdir -p ~/.config/autostart
+cat > ~/.config/autostart/networkmanager-applet.desktop <<EOF
+[Desktop Entry]
+Encoding=UTF-8
+Version=0.9.4
+Type=Application
+Name=NetworkManager Applet
+Comment=
+Exec=nm-applet
+OnlyShowIn=XFCE;
+RunHook=0
+StartupNotify=false
+Terminal=false
+Hidden=false
+EOF
+
+### ===============================
+### Done
+### ===============================
+echo "DONE."

@@ -8,7 +8,7 @@ pd install fedora
 cat << EOF > .bashrc
 #!/data/data/com.termux/files/usr/bin/bash
 
-alias fedora="pd login fedora --termux-home"
+alias fedora="pd login fedora"
 
 SSH_SERVER=true
 
@@ -29,5 +29,5 @@ echo -e "123\n123" | passwd
 ```bash
 dnf upgrade --refresh
 dnf install git curl wget tmux
-ln -s /data/data/com.termux/files/home ~/termux-home
+ln -s /data/data/com.termux/files/home /termux
 ```

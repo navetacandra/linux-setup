@@ -2,7 +2,7 @@
 ```bash
 termux-setup-storage
 pkg up -y
-pkg add proot-distro openssh
+pkg add proot-distro openssh tmux
 pd install fedora
 
 cat << EOF > .bashrc

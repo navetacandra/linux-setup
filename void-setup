@@ -4,9 +4,10 @@ set -e
 ### ===============================
 ### System Update & Base Utilities
 ### ===============================
-sudo xbps-install -Syu
-sudo xbps-install -Sy fastfetch mesa-vulkan-radeon wget curl xz unzip p7zip
+sudo xbps-install -Syu xbps
+sudo xbps-install -Sy fastfetch mesa-dri mesa-vulkan-radeon xf86-video-amdgpu wget curl xz p7zip
 
+mkdir -p ~/.local/bin
 ### ===============================
 ### Networking (Laptop Friendly)
 ### ===============================
@@ -25,15 +26,8 @@ sudo xbps-install -Sy \
   xorg \
   xfce4 \
   rofi \
-  flameshot
-
-### ===============================
-### Display Manager (LightDM)
-### ===============================
-sudo xbps-install -Sy lightdm lightdm-gtk-greeter
-
-sudo ln -sf /etc/sv/dbus /var/service
-sudo ln -sf /etc/sv/lightdm /var/service
+  flameshot \
+  gvfs
 
 ### ===============================
 ### Fonts
@@ -50,13 +44,11 @@ sudo xbps-install -Sy \
   pipewire \
   alsa-pipewire \
   wireplumber \
-  pavucontrol \
-  xfce4-pulseaudio-plugin
+  pavucontrol
 
-# ---- Custom single runit service for full PipeWire stack ----
-sudo mkdir -p /etc/sv/pipewire-stack
-
-sudo tee /etc/sv/pipewire-stack/run > /dev/null <<'EOF'
+# ---- Setup xinitrc ----
+sudo ln -sf /etc/sv/dbus /var/service
+sudo tee /etc/X11/xinit/xinitrc > /dev/null <<'EOF'
 #!/bin/sh
 set -e
 
@@ -69,31 +61,78 @@ PULSE_PID=$!
 wireplumber &
 WIREPLUMBER_PID=$!
 
-wait -n
+nm-applet &
 
-kill $PIPEWIRE_PID $PULSE_PID $WIREPLUMBER_PID 2>/dev/null || true
-wait
+exec startlxqt
 EOF
 
-sudo chmod +x /etc/sv/pipewire-stack/run
+tee ~/.local/bin/sysinfo > /dev/null <<'EOF'
+#!/usr/bin/sh
 
-# Disable possible default services (ignore if not exist)
-sudo rm -f /var/service/pipewire \
-           /var/service/pipewire-pulse \
-           /var/service/wireplumber
+mb_gb() {
+    local a=$1
+    if [ $(($a / 1024 / 1024)) -gt 0 ]; then
+        echo "$(($a / 1024 / 1024))GiB"
+    else
+        echo "$(($a / 1024))MiB"
+    fi
+}
 
-# Enable unified stack
-sudo ln -sf /etc/sv/pipewire-stack /var/service/pipewire-stack
+cpu_load() {
+    echo $(grep -o "^[^ ]*" /proc/loadavg)
+}
+
+cpu_temp() {
+    echo $(($(cat /sys/class/thermal/thermal_zone0/temp)/1000))
+}
+
+ram_stat() {
+    local total=$(awk '/^MemTotal/ {print $2}' /proc/meminfo)
+    local avail=$(awk '/^MemAvailable/ {print $2}' /proc/meminfo)
+    local free=$(awk '/^MemFree/ {print $2}' /proc/meminfo)
+    local buffers=$(awk '/^Buffers/ {print $2}' /proc/meminfo)
+    local cached=$(awk '/^Cached/ {print $2}' /proc/meminfo)
+    local used=$(($total - $free - $buffers - $cached))
+
+    local total_mbgb=$(mb_gb $total)
+    local used_mbgb=$(mb_gb $used)
+
+    echo "$used_mbgb/$total_mbgb"
+}
+
+net_stat_file() {
+    local file="$(cat /proc/net/dev)"
+    local d=$(echo "$file" | awk '$1 ~ /:$/ && $1 != "lo:" {sum += $2} END {print sum}')
+    local u=$(echo "$file" | awk '$1 ~ /:$/ && $1 != "lo:" {sum += $10} END {print sum}')
+    echo "$d $u"
+}
+
+net_stat() {
+    local ns1="$(net_stat_file)"
+    sleep 1
+    local ns2="$(net_stat_file)"
+    local d1=$(echo "$ns1" | awk '{print $1}')
+    local u1=$(echo "$ns1" | awk '{print $2}')
+    local d2=$(echo "$ns2" | awk '{print $1}')
+    local u2=$(echo "$ns2" | awk '{print $2}')
+    echo "$(($d2-d1)) $(($u2-u1))"
+}
+
+sysinfo() {
+    local net=$(net_stat)
+    local download=$(echo $net | awk '{print $1}')
+    local upload=$(echo $net | awk '{print $2}')
+    echo "CPU: $(cpu_load)% | Temp: $(cpu_temp)℃ | RAM: $(ram_stat) | Download: $(($download/1000))Kbps | Upload: $(($upload/1000))Kbps"
+}
+
+sysinfo
+EOF
+chmod +x ~/.local/bin/sysinfo # untuk ditampilkan sebagai widget
 
 ### ===============================
-### Browser (Zen)
+### Browser (Firefox)
 ### ===============================
-wget https://github.com/zen-browser/desktop/releases/download/1.18.3b/zen.linux-x86_64.tar.xz
-tar xvf zen.linux-x86_64.tar.xz
-rm zen.linux-x86_64.tar.xz
-
-sudo mv zen /opt/zen
-sudo ln -sf /opt/zen/zen /bin/zen
+sudo xbps-install -Sy firefox
 
 ### ===============================
 ### Editor (Zed)
@@ -101,12 +140,10 @@ sudo ln -sf /opt/zen/zen /bin/zen
 curl -f https://zed.dev/install.sh | sh
 
 ### ===============================
-### Nix + Dev Tools
+### Rootless containerization
 ### ===============================
-sudo xbps-install -Sy nix git lazygit
-
-mkdir -p ~/.config/nix
-echo "experimental-features = nix-command flakes" > ~/.config/nix/nix.conf
+git clone https://github.com/navetacandra/pocker.git ~/.local/share/pocker
+ln -s ~/.local/share/pocker/pocker ~/.local/bin/pocker
 
 ### ===============================
 ### Shell Environment
@@ -114,26 +151,6 @@ echo "experimental-features = nix-command flakes" > ~/.config/nix/nix.conf
 if ! grep -q '.local/bin' ~/.bashrc 2>/dev/null; then
   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 fi
-
-### ===============================
-### Laptop UX Tweaks (XFCE)
-### ===============================
-# Ensure NetworkManager applet autostarts
-mkdir -p ~/.config/autostart
-cat > ~/.config/autostart/networkmanager-applet.desktop <<EOF
-[Desktop Entry]
-Encoding=UTF-8
-Version=0.9.4
-Type=Application
-Name=NetworkManager Applet
-Comment=
-Exec=nm-applet
-OnlyShowIn=XFCE;
-RunHook=0
-StartupNotify=false
-Terminal=false
-Hidden=false
-EOF
 
 ### ===============================
 ### Done

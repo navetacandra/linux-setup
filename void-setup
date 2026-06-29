@@ -147,6 +147,34 @@ cat << EOF | sudo tee ~/.config/containers/containers.conf > /dev/null
 runtime = "crun"
 EOF
 
+git clone https://github.com/89luca89/distrobox.git
+cd distrobox
+cat << EOF | sudo tee podman-compose.yaml > /dev/null
+services:
+  distrobox-build:
+    image: docker.io/library/golang:1.25
+    working_dir: /src
+    volumes:
+      - ./:/src:Z
+      - ./out:/out:Z
+      - go-mod-cache:/go/pkg/mod:Z
+      - go-build-cache:/root/.cache/go-build:Z
+    environment:
+      GOFLAGS: "-buildvcs=false"
+    command: >
+      sh -ec '
+        go version
+        make build
+        make install PREFIX=/out
+      '
+
+volumes:
+  go-mod-cache:
+  go-build-cache:
+EOF
+podman compose up --build
+cd ..
+
 mkdir -p ~/.distrobox/{fedora,ubuntu,alpine}
 cat << EOF | sudo tee ~/.distrobox/distrobox.ini > /dev/null
 [fedora]
@@ -177,7 +205,7 @@ replace=true
 home="/home/naveta/.distrobox/alpine"
 EOF
 
-distrobox assemble create --file ~/.distrobox/distrobox.ini
+# distrobox assemble create --file ~/.distrobox/distrobox.ini
 
 ### ===============================
 ### Done
